@@ -10,7 +10,8 @@
 namespace sphaira::ui::menu::stream {
 namespace {
 
-constexpr u64 MAX_BUFFER_SIZE = 1024ULL*1024ULL*1ULL;
+constexpr u64 MAX_BUFFER_SIZE_APP = 1024ULL * 1024ULL * 16ULL;
+constexpr u64 MAX_BUFFER_SIZE_APPLET = 1024ULL * 1024ULL * 4ULL;
 
 // every wait in here is bounded, a missed wakeup then costs a few ms rather
 // than hanging the transport (and with it the whole app) forever.
@@ -20,11 +21,15 @@ constexpr u64 POLL_INTERVAL_SLOW = 1e+7; // 10ms.
 
 } // namespace
 
-Stream::Stream(const fs::FsPath& path, std::stop_token token) {
+Stream::Stream(const fs::FsPath& path, std::stop_token token, size_t capacity) {
     m_path = path;
     m_token = token;
     m_active = true;
-    m_buffer.reserve(MAX_BUFFER_SIZE);
+    if (!capacity) {
+        capacity = App::IsApplication() ? MAX_BUFFER_SIZE_APP : MAX_BUFFER_SIZE_APPLET;
+    }
+    m_capacity = std::max<size_t>(capacity, 1024);
+    m_buffer.resize(m_capacity);
 
     mutexInit(&m_mutex);
     condvarInit(&m_can_read);
@@ -43,7 +48,7 @@ Result Stream::ReadChunk(void* _buf, s64 size, u64* bytes_read) {
     while (!m_token.stop_requested()) {
         SCOPED_MUTEX(&m_mutex);
 
-        if (m_buffer.empty()) {
+        if (!m_size) {
             if (!m_active) {
                 break;
             }
@@ -52,9 +57,15 @@ Result Stream::ReadChunk(void* _buf, s64 size, u64* bytes_read) {
             continue;
         }
 
-        const auto rsize = std::min<s64>(size, m_buffer.size());
-        std::memcpy(buf, m_buffer.data(), rsize);
-        m_buffer.erase(m_buffer.begin(), m_buffer.begin() + rsize);
+        const auto rsize = std::min<size_t>(size, m_size);
+        const auto first = std::min<size_t>(rsize, m_capacity - m_read_pos);
+        std::memcpy(buf, m_buffer.data() + m_read_pos, first);
+        if (rsize > first) {
+            std::memcpy(buf + first, m_buffer.data(), rsize - first);
+        }
+
+        m_read_pos = (m_read_pos + rsize) % m_capacity;
+        m_size -= rsize;
         condvarWakeAll(std::addressof(m_can_write));
 
         size -= rsize;
@@ -87,7 +98,7 @@ bool Stream::Push(const void* _buf, s64 size) {
 
         // the installer already finished (or gave up) reading this file, the
         // remaining data is not needed, pretend it was consumed so that the
-        // transport can move on to the next file.
+        // transport can drain cleanly and move on to the next file.
         if (m_install_done) {
             return true;
         }
@@ -97,16 +108,20 @@ bool Stream::Push(const void* _buf, s64 size) {
             break;
         }
 
-        if (m_buffer.size() >= MAX_BUFFER_SIZE) {
+        if (m_size >= m_capacity) {
             Wait(std::addressof(m_can_write));
             continue;
         }
 
-        const auto wsize = std::min<s64>(size, MAX_BUFFER_SIZE - m_buffer.size());
-        const auto offset = m_buffer.size();
-        m_buffer.resize(offset + wsize);
+        const auto wsize = std::min<size_t>(size, m_capacity - m_size);
+        const auto first = std::min<size_t>(wsize, m_capacity - m_write_pos);
+        std::memcpy(m_buffer.data() + m_write_pos, buf, first);
+        if (wsize > first) {
+            std::memcpy(m_buffer.data(), buf + first, wsize - first);
+        }
 
-        std::memcpy(m_buffer.data() + offset, buf, wsize);
+        m_write_pos = (m_write_pos + wsize) % m_capacity;
+        m_size += wsize;
         condvarWakeAll(std::addressof(m_can_read));
 
         size -= wsize;
@@ -132,6 +147,10 @@ void Stream::Disable() {
 void Stream::SetInstallFinished() {
     SCOPED_MUTEX(&m_mutex);
     m_install_done = true;
+    m_active = false;
+    m_size = 0;
+    m_read_pos = 0;
+    m_write_pos = 0;
     condvarWakeAll(std::addressof(m_can_read));
     condvarWakeAll(std::addressof(m_can_write));
 }
@@ -237,20 +256,11 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
 
     // pushed outside of the lock, creating the progress box spawns a thread
     // whilst the transport thread is polling m_state.
-    App::Push<ui::ProgressBox>(0, "Installing "_i18n, source->GetPath(), [this, source](auto pbox) -> Result {
-        // whatever happens, stop the transport from blocking on this stream.
+    App::Push<ui::ProgressBox>(0, "Installing "_i18n, source->GetPath(), [source](auto pbox) -> Result {
+        // whatever happens, atomically mark finished so transport never blocks or errors in Push().
         ON_SCOPE_EXIT(source->SetInstallFinished());
 
-        const auto rc = yati::InstallFromSource(pbox, source.get(), source->GetPath());
-
-        // the transport may accept the next file again.
-        OnFinishInstallProgress();
-
-        if (R_FAILED(rc)) {
-            source->Disable();
-            R_THROW(rc);
-        }
-
+        R_TRY(yati::InstallFromSource(pbox, source.get(), source->GetPath()));
         R_SUCCEED();
     }, [this](Result rc){
         App::PushErrorBox(rc, "Install failed!"_i18n);
@@ -358,13 +368,6 @@ void Menu::OnInstallClose() {
         // the file has been fully received, let the installer drain whatever
         // is still buffered.
         source->Disable();
-    }
-
-    // mtp answers the next CreateFile() with DeviceBusy until the install has
-    // finished, so it returns straight away. ftp has no such response and
-    // relies on this blocking to serialise its queue.
-    if (!WaitForInstallOnClose()) {
-        return;
     }
 
     // wait until the install has finished before returning. without this the

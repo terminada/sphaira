@@ -47,7 +47,7 @@ if (SWITCH2)
     endforeach()
 endif()
 
-set(sphaira_VERSION 1.1.1)
+set(sphaira_VERSION 1.1.2)
 
 project(sphaira
     VERSION ${sphaira_VERSION}
@@ -489,8 +489,8 @@ if (ENABLE_LIBHAZE)
     endif()
 
     FetchContent_Declare(libhaze
-        GIT_REPOSITORY https://github.com/R-YaTian/libhaze.git
-        GIT_TAG 9f5467c
+        GIT_REPOSITORY https://github.com/terminada/libhaze.git
+        GIT_TAG 2bf264c343129b4680c9f5fa01f01c8ec2d78e59
         ${libhaze_patch}
     )
 

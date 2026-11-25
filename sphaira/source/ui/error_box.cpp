@@ -228,6 +228,10 @@ auto GetCodeHint(Result rc) -> std::string {
 
 } // namespace
 
+auto GetResultName(Result rc) -> const char* {
+    return GetCodeMessage(rc);
+}
+
 ErrorBox::ErrorBox(const std::string& message) : m_message{message} {
     log_write("[ERROR] %s\n", m_message.c_str());
 

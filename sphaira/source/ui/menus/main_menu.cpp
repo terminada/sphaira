@@ -47,7 +47,7 @@
 namespace sphaira::ui::menu::main {
 namespace {
 
-constexpr const char* GITHUB_URL{"https://api.github.com/repos/NaGaa95/sphaira/releases/latest"};
+constexpr const char* GITHUB_URL{"https://api.github.com/repos/terminada/sphaira/releases/latest"};
 constexpr fs::FsPath CACHE_PATH{"/switch/sphaira/cache/sphaira_latest.json"};
 
 // paths where sphaira can be installed, used when updating

@@ -5,6 +5,8 @@
 
 namespace sphaira::ui {
 
+auto GetResultName(Result rc) -> const char*;
+
 class ErrorBox final : public Widget {
 public:
     ErrorBox(Result code, const std::string& message);

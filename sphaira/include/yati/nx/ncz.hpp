@@ -11,7 +11,8 @@
 
 namespace sphaira::ncz {
 
-#define NCZ_SECTION_MAGIC 0x4E544345535A434EUL
+#define NCZ_SECTION_MAGIC  0x4E544345535A434EUL
+#define NCZ_SECTION2_MAGIC 0x32544345535A434EUL
 // todo: byteswap this
 #define NCZ_BLOCK_MAGIC std::byteswap(0x4E435A424C4F434BUL)
 
@@ -63,7 +64,7 @@ struct Section {
     u64 offset;
     u64 size;
     u64 crypto_type;
-    u64 padding;
+    s64 counter_offset;
     u8 key[0x10];
     u8 counter[0x10];
 

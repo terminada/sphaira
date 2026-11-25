@@ -347,7 +347,7 @@ Result MountNcaInternal(fs::Fs* fs, const std::shared_ptr<yati::source::Base>& s
         R_TRY(source->Read2(&ncz_header, NCZ_NORMAL_SIZE, sizeof(ncz_header)));
     }
 
-    if (size >= NCZ_NORMAL_SIZE && ncz_header.magic == NCZ_SECTION_MAGIC) {
+    if (size >= NCZ_NORMAL_SIZE && (ncz_header.magic == NCZ_SECTION_MAGIC || ncz_header.magic == NCZ_SECTION2_MAGIC)) {
         // read all the sections.
         s64 ncz_offset = NCZ_SECTION_OFFSET;
         ncz::Sections ncz_sections(ncz_header.total_sections);

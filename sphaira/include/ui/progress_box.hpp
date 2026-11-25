@@ -19,6 +19,16 @@ enum class ProgressBoxOption : u8 {
 };
 
 struct ProgressBox final : Widget {
+    struct HeadlessTag {};
+    struct ProgressSnapshot {
+        std::string title{};
+        std::string transfer{};
+        s64 offset{};
+        s64 size{};
+        s64 speed{};
+    };
+
+    explicit ProgressBox(HeadlessTag);
     ProgressBox(
         int image,
         const std::string& action,
@@ -48,6 +58,7 @@ struct ProgressBox final : Widget {
     void SetHideAction(const std::function<void()>& on_hide);
     // thread safe, for drawing the progress of a box that isn't on screen.
     void GetProgress(s64& offset, s64& size);
+    auto GetProgressSnapshot() -> ProgressSnapshot;
 
     void RequestExit();
     auto ShouldExit() -> bool;
@@ -125,6 +136,7 @@ private:
     bool m_own_image{};
     bool m_screen_toggle_enabled{};
     bool m_hideable{};
+    bool m_headless{};
 };
 
 // this is a helper function that does many things.

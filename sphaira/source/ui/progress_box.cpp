@@ -24,11 +24,17 @@ void threadFunc(void* arg) {
 
 } // namespace
 
+ProgressBox::ProgressBox(HeadlessTag) : m_headless{true} {
+    mutexInit(&m_mutex);
+    ueventCreate(&m_uevent, false);
+}
+
 ProgressBox::ProgressBox(int image, const std::string& action, const std::string& title, const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done, ProgressBoxOption option)
 : m_done{done}
 , m_action{action}
 , m_title{title}
 , m_image{image} {
+    mutexInit(&m_mutex);
     App::SetAutoSleepDisabled(true);
     if (App::GetApp()->m_progress_boost_mode.Get()) {
         App::SetBoostMode(true);
@@ -68,6 +74,10 @@ ProgressBox::ProgressBox(int image, const std::string& action, const std::string
 ProgressBox::~ProgressBox() {
     ueventSignal(GetCancelEvent());
     m_stop_source.request_stop();
+
+    if (m_headless) {
+        return;
+    }
 
     if (R_FAILED(threadWaitForExit(&m_thread))) {
         log_write("failed to join thread\n");
@@ -122,6 +132,17 @@ void ProgressBox::GetProgress(s64& offset, s64& size) {
     SCOPED_MUTEX(&m_mutex);
     offset = m_offset;
     size = m_size;
+}
+
+auto ProgressBox::GetProgressSnapshot() -> ProgressSnapshot {
+    SCOPED_MUTEX(&m_mutex);
+    const double elapsed = m_timestamp.GetSecondsD();
+    if (elapsed >= 1.0) {
+        m_timestamp.Update();
+        m_speed = static_cast<s64>((m_offset - m_last_offset) / elapsed);
+        m_last_offset = m_offset;
+    }
+    return {m_title, m_transfer, m_offset, m_size, m_speed};
 }
 
 auto ProgressBox::Update(Controller* controller, TouchInfo* touch) -> void {
@@ -207,7 +228,7 @@ auto ProgressBox::Draw(NVGcontext* vg, Theme* theme) -> void {
         gfx::drawSpinner(vg, theme, prog_bar.x - pad - rad, prog_bar.y + prog_bar.h / 2, rad, armTicksToNs(armGetSystemTick()) / 1e+9);
 
         const auto left = size - last_offset;
-        const auto left_seconds = left / speed;
+        const auto left_seconds = speed > 0 ? left / speed : 0;
         const auto hours = left_seconds / (60 * 60);
         const auto minutes = left_seconds % (60 * 60) / 60;
         const auto seconds = left_seconds % 60;
@@ -302,6 +323,7 @@ auto ProgressBox::NewTransfer(const std::string& transfer)  -> ProgressBox& {
     m_size = 0;
     m_offset = 0;
     m_last_offset = 0;
+    m_speed = 0;
     m_timestamp.Update();
     return *this;
 }
@@ -311,6 +333,7 @@ auto ProgressBox::ResetTranfser() -> ProgressBox& {
     m_size = 0;
     m_offset = 0;
     m_last_offset = 0;
+    m_speed = 0;
     m_timestamp.Update();
     return *this;
 }
@@ -323,6 +346,9 @@ auto ProgressBox::UpdateTransfer(s64 offset, s64 size)  -> ProgressBox& {
 }
 
 auto ProgressBox::SetImage(int image) -> ProgressBox& {
+    if (m_headless) {
+        return *this;
+    }
     SCOPED_MUTEX(&m_mutex);
     m_image_pending = image;
     m_is_image_pending = true;
@@ -330,12 +356,18 @@ auto ProgressBox::SetImage(int image) -> ProgressBox& {
 }
 
 auto ProgressBox::SetImageData(std::vector<u8>& data) -> ProgressBox& {
+    if (m_headless) {
+        return *this;
+    }
     SCOPED_MUTEX(&m_mutex);
     std::swap(m_image_data, data);
     return *this;
 }
 
 auto ProgressBox::SetImageDataConst(std::span<const u8> data) -> ProgressBox& {
+    if (m_headless) {
+        return *this;
+    }
     SCOPED_MUTEX(&m_mutex);
     m_image_data.resize(data.size());
     std::memcpy(m_image_data.data(), data.data(), m_image_data.size());

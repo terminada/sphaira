@@ -27,7 +27,7 @@ using OnInstallWrite = std::function<bool(const void* buf, size_t size)>;
 using OnInstallClose = std::function<void()>;
 
 struct Stream final : yati::source::Stream {
-    Stream(const fs::FsPath& path, std::stop_token token);
+    Stream(const fs::FsPath& path, std::stop_token token, size_t capacity = 0);
 
     // called by the installer thread.
     Result ReadChunk(void* buf, s64 size, u64* bytes_read) override;
@@ -54,6 +54,10 @@ private:
     fs::FsPath m_path{};
     std::stop_token m_token{};
     std::vector<u8> m_buffer{};
+    size_t m_capacity{};
+    size_t m_read_pos{};
+    size_t m_write_pos{};
+    size_t m_size{};
     CondVar m_can_read{};
     CondVar m_can_write{};
     Mutex m_mutex{};
@@ -73,12 +77,6 @@ struct Menu : MenuBase {
     // returns false once the transport is no longer accepting installs, used
     // to break out of the blocking callbacks below.
     virtual bool IsInstallModeActive() const = 0;
-    // called by the installer thread once the install has finished, the
-    // transport may accept the next file again.
-    virtual void OnFinishInstallProgress() {}
-    // whether OnInstallClose() blocks until the install has finished. mtp
-    // returns false as it answers the next file with DeviceBusy instead.
-    virtual bool WaitForInstallOnClose() const { return true; }
 
 protected:
     // the below are called from the transport (mtp / ftp) thread and may block
